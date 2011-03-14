@@ -1,0 +1,220 @@
+<html><style>canvas {position:absolute; left:0; top:0;}</style><body></body><script src=gLayer.js></script><script>
+/*------------------------------------------------------------------------------
+Ray-casting demo
+Mar. 11, 2011
+jsyang.ca@gmail.com
+------------------------------------------------------------------------------*/
+
+// Simplify ImgData manipulation with these functions.
+    function get(imgdata,i)
+    {
+        return [
+            imgdata.data[i+0],
+            imgdata.data[i+1],
+            imgdata.data[i+2],
+            imgdata.data[i+3]
+        ];
+    }
+    
+    function set(imgdata,i,RGB)
+    {
+        imgdata.data[i+0]=RGB[0];
+        imgdata.data[i+1]=RGB[1];
+        imgdata.data[i+2]=RGB[2];
+        imgdata.data[i+3]=RGB[3]?RGB[3]:0xff;
+    }
+    
+    function eq(RGB1,RGB2)
+    {
+        var equal=true;
+        for(var i in RGB1)
+        {
+            equal &= RGB1[i]==RGB2[i];
+        }
+        return equal;
+    }
+
+// Normalize a vector
+    function VNorm(v)
+    {
+        var length2=0;
+        for(var i in v) length2+=v[i]*v[i];
+        length2=Math.sqrt(length2);
+        for(var i in v) v[i]/=length2;
+        return v;
+    }
+
+// Scale a vector
+    function VScale(v,s)
+    {
+        var v2=v.slice(0);
+        for(var i in v2) v2[i]*=s;
+        return v2;    
+    }
+
+// Sum 2 vectors
+    function VSum(v1,v2)
+    {
+        var v3=[];
+        for(var i in v1) v3.push(v1[i]+v2[i]);
+        return v3;
+    }
+
+// Rotate a vector in 2D    
+    function V2DRotate(v,a)
+    {
+        var oldA=Math.atan2(v[1],v[0]);
+        var oldR=Math.sqrt(v[0]*v[0] + v[1]*v[1]);
+        return [
+            oldR*Math.cos(oldA+a),
+            oldR*Math.sin(oldA+a)
+        ];
+    }
+
+
+// The place we're going to be moving around in. (width: 16, height: 8)
+// Each tile takes up a 16x16 gamespace.
+var map={
+    width:26,
+    height:10,
+    
+    tilewidth:8,
+    
+    data:[
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,1,0,1,1,1,1,1,1,1,0,1,0,1],
+    [1,0,0,0,0,0,0,0,0,1,1,1,0,0,1,0,0,0,0,1,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,1,1,0,1],
+    [1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,1,0,1],
+    [1,0,0,0,0,0,0,0,0,1,1,1,0,1,1,0,0,0,0,0,0,1,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ]
+};
+
+function RayCastCam(loc,ctx,screenSize,horizonImage)
+{
+    // Camera properties
+    this.loc=loc;
+    this.angle=0;   // points E to start.
+    
+    this.ctx=ctx;
+    
+    // Screen size
+    this.w=screenSize[0];
+    this.h=screenSize[1];
+    
+    // Horizons -- floor and ceiling, prerendering
+    this.horizon=horizonImage;
+    
+    this.MoveCameraForward=function()
+    {
+        this.loc=VSum(this.loc,V2DRotate([1,0],this.angle));
+    };
+    
+    this.MoveCameraBackward=function()
+    {
+        this.loc=VSum(this.loc,V2DRotate([-1,0],this.angle));
+    };
+    
+    this.render=function(m)
+    {
+        // Draw pre-rendered horizon so we don't have to do it again
+        this.ctx.drawImage(this.horizon,0,0,this.w,this.h);
+        
+        // Notation
+        var tw=map.tilewidth;
+        var screenRatio=this.h/this.w;
+        
+        // For each column in our screen,
+        for(var i=0,sx=-(this.w>>1);i<this.w;i++,sx++)
+        {
+            
+            // Focal length...
+            var dir=VNorm(V2DRotate([this.w,sx],this.angle));
+            //var dir=VNorm(V2DRotate([tw*(this.w>>2),sx],this.angle));
+            
+            // Find the tile that the ray has hit
+            var t=0;
+            do
+            {
+                var hit=0;
+                var y=(this.loc[1]+t*dir[1])/tw;
+                var x=(this.loc[0]+t*dir[0])/tw;
+                
+                if(map.data[y>>0][x>>0]) hit=1;
+                else t+=0.5;
+            }
+            while(!hit);
+            
+            var shadingMultiplier=1-((Math.atan(t/(tw<<1))*2)/Math.PI);
+            //var shadingMultiplier=Math.atan(this.h/(t*tw*2));
+            //var shadingMultiplier=1/Math.log(t);
+            var columnHeight=this.h/(screenRatio*t/tw);
+            
+            var gutter=(this.h-columnHeight)/2;
+            
+            var shade=Math.round(shadingMultiplier*256); 
+            ctx.fillStyle="rgb(32,"+shade+","+shade+")";
+            ctx.fillRect(i,gutter,1,columnHeight);
+        }
+    };
+}
+
+
+// Camera.
+var c;
+
+// Dimensions of the camera image / canvas / texture.
+var iw=300; var ih=200;
+
+var gL=new gLayer(
+    ["horizon.png"],
+    [iw,ih],
+    function(){setTimeout("setupEvents()",200);}
+);
+
+
+function setupEvents()
+{
+    // After texture is done loading, create a new camera
+    c=new RayCastCam(
+        [40,30],
+        gL.c,
+        [iw,ih],
+        gL.i[0]        
+    );
+    
+	c.angle=0.51;
+	c.render(map);
+	
+    // "WASD" event
+    document.body.onkeydown=function(e)
+    {    
+        switch(e.keyCode)
+        {
+            case 38:    // UP
+            case 87:    // W
+                c.MoveCameraForward();
+                break;
+            case 40:    // DOWN
+            case 83:    // S
+                c.MoveCameraBackward();
+                break;
+            case 37:    // LEFT
+            case 65:    // A
+                c.angle-=0.05;
+                break;
+            case 39:    // RIGHT
+            case 68:    // D
+                c.angle+=0.05;
+                break;
+        }
+		c.render(map);
+    };
+	
+}
+
+</script></html>
