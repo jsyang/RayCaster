@@ -60,6 +60,12 @@ jsyang.ca@gmail.com
         return v3;
     }
 
+// Sum 2 x 2D vectors (faster)
+    function V2DSum(v1,v2)
+    {
+        return [v1[0]+v2[0],v1[1]+v2[1]];
+    }
+
 // Rotate a vector in 2D    
     function V2DRotate(v,a)
     {
@@ -71,30 +77,17 @@ jsyang.ca@gmail.com
         ];
     }
 
+// Rotate a vector in 2D with radius 1 (FASTER)
+    function V2DRotateNorm(v,a)
+    {
+        var oldA=Math.atan2(v[1],v[0]);
+        return [
+            Math.cos(oldA+a),
+            Math.sin(oldA+a)
+        ];
+    }
 
-// The place we're going to be moving around in. (width: 16, height: 8)
-// Each tile takes up a 16x16 gamespace.
-var map={
-    width:26,
-    height:10,
-    
-    tilewidth:8,
-    
-    data:[
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-    [1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,1,0,1,1,1,1,1,1,1,0,1,0,1],
-    [1,0,0,0,0,0,0,0,0,1,1,1,0,0,1,0,0,0,0,1,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,1,1,0,1],
-    [1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,1,0,1],
-    [1,0,0,0,0,0,0,0,0,1,1,1,0,1,1,0,0,0,0,0,0,1,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
-    ]
-};
-
-function RayCastCam(loc,ctx,screenSize,horizonImage)
+function RayCastCam(loc,ctx,screenSize,horizonImage,mapImage)
 {
     // Camera properties
     this.loc=loc;
@@ -108,56 +101,80 @@ function RayCastCam(loc,ctx,screenSize,horizonImage)
     
     // Horizons -- floor and ceiling, prerendering
     this.horizon=horizonImage;
-    
-    this.MoveCameraForward=function()
+
+    // Load generate the map from image!   
+    this.map=(function(ctx,img)
     {
-        this.loc=VSum(this.loc,V2DRotate([1,0],this.angle));
+        var level=[];
+        ctx.drawImage(img,0,0);
+        var imgW=img.width;
+        var imgH=img.height;
+        var mapImgData=ctx.getImageData(0,0,imgW,imgH);        
+        
+        
+        for(var i=0; i<imgH; i++)
+        {
+            var row=[];
+            for(var j=0; j<imgW; j++)
+            {
+                row.push( get(mapImgData,(j+i*imgW)<<2)[0]==0 ? 1 : 0 );
+            }
+            level.push(row.slice(0));
+        }        
+        
+        return {
+            tilewidth:8,
+            data:level
+        };
+    })(ctx,mapImage);
+    
+    // Moving forward, backward
+    this.MoveCamera=function(d)
+    {
+        this.loc=V2DSum(this.loc,V2DRotateNorm([d,0],this.angle));
     };
     
-    this.MoveCameraBackward=function()
-    {
-        this.loc=VSum(this.loc,V2DRotate([-1,0],this.angle));
-    };
-    
-    this.render=function(m)
+    // Render the scene!
+    this.render=function()
     {
         // Draw pre-rendered horizon so we don't have to do it again
         this.ctx.drawImage(this.horizon,0,0,this.w,this.h);
         
         // Notation
-        var tw=map.tilewidth;
-        var screenRatio=this.h/this.w;
-        
+        var tw=this.map.tilewidth;
+        var twbs=3; // bitshift version, no division
+        var columnHeightNumerator=this.w<<twbs;
+        var hReciprocal=1/this.h;
+        var tdelta=this.h/(this.w+this.h);
+                
         // For each column in our screen,
         for(var i=0,sx=-(this.w>>1);i<this.w;i++,sx++)
         {
             
             // Focal length...
-            var dir=VNorm(V2DRotate([this.w,sx],this.angle));
-            //var dir=VNorm(V2DRotate([tw*(this.w>>2),sx],this.angle));
+            var dir=V2DRotateNorm([this.w,sx],this.angle);
             
             // Find the tile that the ray has hit
             var t=0;
+            var oldy=0,oldx=0;
             do
             {
                 var hit=0;
-                var y=(this.loc[1]+t*dir[1])/tw;
-                var x=(this.loc[0]+t*dir[0])/tw;
+                var y=(this.loc[1]+t*dir[1])>>twbs;
+                var x=(this.loc[0]+t*dir[0])>>twbs;
                 
-                if(map.data[y>>0][x>>0]) hit=1;
-                else t+=0.5;
+                if(this.map.data[y][x]) hit=1;
+                t+=0.24;
             }
             while(!hit);
             
-            var shadingMultiplier=1-((Math.atan(t/(tw<<1))*2)/Math.PI);
-            //var shadingMultiplier=Math.atan(this.h/(t*tw*2));
-            //var shadingMultiplier=1/Math.log(t);
-            var columnHeight=this.h/(screenRatio*t/tw);
+            var columnHeight=columnHeightNumerator/t;
+            var shadingMultiplier=Math.atan(columnHeight*hReciprocal*5);
             
             var gutter=(this.h-columnHeight)/2;
             
             var shade=Math.round(shadingMultiplier*256); 
-            ctx.fillStyle="rgb(32,"+shade+","+shade+")";
+            ctx.fillStyle="rgb("+shade+","+(shade>>1)+","+(shade>>2)+")";
             ctx.fillRect(i,gutter,1,columnHeight);
         }
     };
@@ -167,54 +184,70 @@ function RayCastCam(loc,ctx,screenSize,horizonImage)
 // Camera.
 var c;
 
+// Movement events
+var turnLR=0;
+var forwardBack=0;
+
 // Dimensions of the camera image / canvas / texture.
-var iw=300; var ih=200;
+var iw=200; var ih=120;
 
 var gL=new gLayer(
-    ["horizon.png"],
+    ["horizon.png","map.png"],
     [iw,ih],
     function(){setTimeout("setupEvents()",200);}
 );
 
+// Update the camera's position and stuff
+function keyboardUpdateCam()
+{
+    if(turnLR) c.angle+=turnLR*0.05;
+    if(forwardBack) c.MoveCamera(forwardBack);    
+    if(turnLR||forwardBack) c.render();
+    turnLR=0;
+    forwardBack=0;
+}
 
 function setupEvents()
-{
+{        
     // After texture is done loading, create a new camera
     c=new RayCastCam(
         [40,30],
         gL.c,
         [iw,ih],
-        gL.i[0]        
+        gL.i[0],
+        gL.i[1]
     );
     
-	c.angle=0.51;
-	c.render(map);
+    // Initial view.
+	c.render();
 	
     // "WASD" event
     document.body.onkeydown=function(e)
-    {    
-        switch(e.keyCode)
+    {   
+        var k=e.keyCode;
+        if(k==87 || k==38) // W, UP
         {
-            case 38:    // UP
-            case 87:    // W
-                c.MoveCameraForward();
-                break;
-            case 40:    // DOWN
-            case 83:    // S
-                c.MoveCameraBackward();
-                break;
-            case 37:    // LEFT
-            case 65:    // A
-                c.angle-=0.05;
-                break;
-            case 39:    // RIGHT
-            case 68:    // D
-                c.angle+=0.05;
-                break;
+            forwardBack=1;
         }
-		c.render(map);
+        else
+        if(k==83 || k==40) // S, DOWN
+        {
+            forwardBack=-1;
+        }
+        
+        if(k==65 || k==37) // A, LEFT
+        {
+            turnLR=-1;
+        }
+        else
+        if(k==68 || k==39) // D, RIGHT
+        {
+            turnLR=1;
+        }                
     };
-	
+    
+    // Update the view as keys are detected.
+    setInterval("keyboardUpdateCam()",20);	
 }
 
 </script></html>
