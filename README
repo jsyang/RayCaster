@@ -1,5 +1,7 @@
-Some more graphics demos in here. A ray-casting engine + the plasma palette looping effect.
-Simple CG demos.
+A simple ray-casting engine; loads a map from an image.
+Map edges should contain a bounding box to prevent "leaks".
+
+Player can wander around in the map with ARROW KEYS or WASD.
 
 jsyang.ca@gmail.com
 Weekend of 03/13/2011.
